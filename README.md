@@ -1,4 +1,4 @@
-Logstash for docker, need to write a nice log for extra facebook likes.
+Logstash for docker, need to write a nice blog for extra facebook likes.
 
 First 'sharing is caring' commit evar!
 
