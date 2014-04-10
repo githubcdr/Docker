@@ -30,12 +30,12 @@ RUN sed 's/main$/main universe/' -i /etc/apt/sources.list
 RUN echo "root:yoleaux" | chpasswd
 
 #RUN	DEBIAN_FRONTEND=noninteractive \
-RUN apt-get -y update \
-	&& apt-get -y install software-properties-common python-software-properties \
-	&& add-apt-repository -y ppa:chris-lea/redis-server \
-	&& apt-get -y update \
-	&& apt-get -y upgrade \
-	&& apt-get -y install openjdk-7-jre-headless redis-server wget mc tcpdump
+RUN apt-get -y update
+RUN apt-get -y install software-properties-common python-software-properties
+RUN add-apt-repository -y ppa:chris-lea/redis-server
+RUN apt-get -y update
+RUN apt-get -y upgrade
+RUN apt-get -y install openjdk-7-jre-headless redis-server wget mc tcpdump
 
 # elasticsearch
 RUN cd /tmp \
