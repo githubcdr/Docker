@@ -30,7 +30,7 @@ RUN sed 's/main$/main universe/' -i /etc/apt/sources.list
 #RUN echo "root:yoleaux" | chpasswd
 
 #RUN	DEBIAN_FRONTEND=noninteractive \
-RUN apt-get -y update
+RUN apt-get update
 RUN apt-get -y install software-properties-common python-software-properties
 RUN add-apt-repository -y ppa:chris-lea/redis-server
 RUN apt-get -y update
