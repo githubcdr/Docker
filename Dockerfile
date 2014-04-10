@@ -27,7 +27,7 @@ CMD ["/sbin/my_init"]
 RUN echo "force-unsafe-io" > /etc/dpkg/dpkg.cfg.d/02apt-speedup
 RUN echo "Acquire::http {No-Cache=True;};" > /etc/apt/apt.conf.d/no-cache
 RUN sed 's/main$/main universe/' -i /etc/apt/sources.list
-RUN echo "root:yoleaux" | chpasswd
+#RUN echo "root:yoleaux" | chpasswd
 
 #RUN	DEBIAN_FRONTEND=noninteractive \
 RUN apt-get -y update
