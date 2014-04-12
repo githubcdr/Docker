@@ -24,8 +24,6 @@ CMD	["/sbin/my_init"]
 # RUN /etc/my_init.d/00_regen_ssh_host_keys.sh
 
 # prep apt-get
-RUN	echo "force-unsafe-io" > /etc/dpkg/dpkg.cfg.d/02apt-speedup
-RUN	echo "Acquire::http {No-Cache=True;};" > /etc/apt/apt.conf.d/no-cache
 RUN	sed 's/main$/main universe/' -i /etc/apt/sources.list
 RUN	echo "root:yoleaux" | chpasswd
 
