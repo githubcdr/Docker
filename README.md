@@ -4,9 +4,9 @@ Description:
 
 Versions:
 
-- Elasticsearch latest (v1.0.1) / with head, paramedic plugin
-- Redis latest
-- Logstash latest (v1.4)
+- Elasticsearch latest (v1.3.4) / with head, paramedic plugin
+- Redis
+- Logstash latest (v1.4.2)
 - Persistent storage optional
 - Build on phusion/baseimage \0/
 
