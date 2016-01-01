@@ -1,0 +1,2 @@
+#!/bin/sh
+exec spamd --max-children 5 --syslog=local4 --pidfile=/var/run/spamd.pid -s stderr 2>&1

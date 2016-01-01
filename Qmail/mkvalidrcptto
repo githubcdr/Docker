@@ -1,0 +1,1011 @@
+#!/usr/bin/perl -w
+#
+# mkvalidrcptto
+# John Simpson <jms1@jms1.net> 2005-04-20
+#
+# reads qmail control files and builds a list of all valid email addresses
+# on the system.
+#
+#   version: 2012-09-16
+# changelog: http://qmail.jms1.net/scripts/mkvalidrcptto.changelog.txt
+#
+###############################################################################
+#
+# Copyright (C) 2005,2006,2007,2008,2010,2012 John Simpson.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License, version 2, as
+# published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+# or visit http://www.gnu.org/licenses/gpl.txt
+#
+###############################################################################
+
+require 5.003 ;
+use strict ;
+
+use CDB_File ;
+use Getopt::Std ;
+
+###############################################################################
+#
+# configuration
+
+my $vq		= "/var/qmail" ;
+my $vuser	= "vpopmail" ;		# vpopmail userid
+
+# if this file exists, it will contain a list of email addresses for which
+# mail should explicitly be rejected. this works by adding or changing the
+# cdb file data value to "-", which the patch interprets as "reject". this
+# allows you to reject a specific address while still accepting a "-default"
+# address.
+my $reject_file	= "/var/qmail/control/mkvalidrcptto.reject" ;
+
+# any numeric uid's on the system which are lower than this will be ignored
+# this way we don't create entries for root, bin, daemon, lp, news, uucp,
+# and other non-used system users.
+my $uid_min	= 500 ;		# ignore uid's lower than this
+my $uid_max	= 65000 ;	# ignore uid's higher than this
+my @uid_ignore	= qw ( ) ;	# ignore any uid's listed in this array
+
+# any entries listed in this array will NOT be included in the output
+my @exclude	= qw
+(
+	sample1@domain.xyz
+	sample2@domain.xyz
+) ;
+
+# if you have text files containing lists of valid mailboxes for smtproutes
+# domains, put them all into a single directory and put that directory in
+# the variable below.
+#
+# each line of each files should contain a mailbox userid- anything on the
+# line which comes after "#" or "@" is deleted, so you can use "#" for
+# comments if you like, and you can use a symlink (or hard link) to cause
+# one file to be effective for multiple domains.
+#
+# note that these files are only consulted for domains listed in the
+# smtproutes file. if this variable is blank, or it points to a directory
+# which doesn't exist, all smtproutes domains will be printed as "@domain",
+# which tells qmail-smtpd to accept any mailbox userid in that domain.
+
+my $smtpr_dir	= "" ;
+
+###############################################################################
+#
+# global variables
+
+my ( %alldom , %ldom , %vdom , %sdom , %adom , %lusr , %ausr , $cdb ,
+	%MRH , %CDB , @output , $ffl , @vfe , %opt , @alias_pw ) ;
+
+my $err		= 0 ;
+my $lfound	= 0 ;
+my $afound	= 0 ;
+my $vfound	= 0 ;
+my $need_untie	= 0 ;
+
+my $vhome	= "" ;
+my $vbin	= "" ;
+my $vinc	= "" ;
+my $vqext	= "?" ;
+my $gdash	= "" ;
+
+###############################################################################
+#
+# debugging function
+
+my $show_debug	= 0 ;
+
+sub debug($)
+{
+	$show_debug && print $_[0] ;
+}
+
+###############################################################################
+#
+# function to read /var/qmail/alias/.qmail-default
+
+sub find_ffl($)
+{
+	my $file = shift ;
+
+	my $flagdeliver = 1 ;
+	my $flagpassthrough = 0 ;
+	my $flagdefault = 0 ;
+
+	if ( open ( DQD , "<$file" ) )
+	{
+		while ( my $line = <DQD> )
+		{
+			chomp $line ;
+			next unless ( $line =~ /^\|.*fastforward/ ) ;
+
+			$line =~ s/^.*fastforward\s+// ;
+			my @dw = split ( /\s+/ , $line ) ;
+			while ( my $zz = shift @dw )
+			{
+				next if ( $zz =~ /^\-/ ) ;
+				$ffl = $zz ;
+				last ;
+			}
+
+			last if ( $ffl ) ;
+		}
+		close DQD ;
+	}
+}
+
+###############################################################################
+###############################################################################
+###############################################################################
+#
+# options:
+#
+# -d		show debug() messages (not useful unless debugging this script)
+#
+# -n		ignore /var/qmail/alias and fastforward domains
+#
+# -m		print output suitable for use directly with "cdbmake"
+#
+# -c x.cdb	generate a .cdb file directly. if the file already exists
+#		and the contents are identical to what we're about to write,
+#		the script will not write a new file (which means that the
+#		timestamp on the cdb file tells when it was last updated.)
+#
+# -r		print a domain report - all domains found in rcpthosts or
+#		morercpthosts.cdb, and how it classifies them
+#		(i.e. local, alias, virtual, smtp, or unknown)
+
+getopts ( "dnmc:r" , \%opt ) ;
+
+if ( $opt{"d"} )
+{
+	$show_debug = 1 ;
+}
+
+###############################################################################
+#
+# only interested in domains for which we legitimately receive mail
+
+open ( I , "<$vq/control/rcpthosts" )
+	or die "$vq/control/rcpthosts: $!\n" ;
+while ( my $line = <I> )
+{
+	chomp $line ;
+	die "ERROR: rcpthosts contains blank lines\n" unless ( $line ) ;
+	$alldom{$line} = 1 ;
+}
+close I ;
+
+if ( -f "$vq/control/morercpthosts.cdb" )
+{
+	tie ( %MRH , "CDB_File" , "$vq/control/morercpthosts.cdb" )
+		or die "$vq/control/morercpthosts: $!\n" ;
+	die "ERROR: morercpthosts.cdb contains a blank entry\n"
+		if ( exists $MRH{""} ) ;
+	map { $alldom{$_} = 1 } keys %MRH ;
+	untie %MRH ;
+}
+
+###############################################################################
+#
+# classify each one as local, virtual, or pass-thru
+#
+# note that if the control/locals file does not exist, the name listed
+# in the control/me file is used as if control/locals contained the 
+# data.
+
+if ( -f "$vq/control/locals" )
+{
+	open ( I , "<$vq/control/locals" )
+		or die "$vq/control/locals: $!\n" ;
+	while ( my $line = <I> )
+	{
+		chomp $line ;
+
+		########################################
+		# ignore any that we don't actually receive mail for
+
+		next unless ( exists $alldom{$line} ) ;
+		delete $alldom{$line} ;
+
+		########################################
+		# mark this one as local
+
+		$ldom{$line} = 1 ;
+		$lfound ++ ;
+		$afound ++ ;
+	}
+	close I ;
+}
+elsif ( -f "$vq/control/me" )
+{
+	open ( I , "<$vq/control/me" )
+		or die "$vq/control/me: $!\n" ;
+	while ( my $line = <I> )
+	{
+		chomp $line ;
+
+		########################################
+		# ignore any that we don't actually receive mail for
+
+		next unless ( exists $alldom{$line} ) ;
+		delete $alldom{$line} ;
+
+		########################################
+		# mark this one as local
+
+		$ldom{$line} = 1 ;
+		$lfound ++ ;
+		$afound ++ ;
+	}
+	close I ;
+}
+
+if ( -f "$vq/control/virtualdomains" )
+{
+	open ( I , "<$vq/control/virtualdomains" )
+		or die "$vq/control/virtualdomains: $!\n" ;
+	while ( my $line = <I> )
+	{
+		chomp $line ;
+
+		########################################
+		# extract the domain name
+
+		my ( $dom , $zu ) = split ( /\s*\:\s*/ , $line ) ;
+		$dom || die "error in $vq/control/virtualdomains\n$line\n" ;
+
+		########################################
+		# handle full email address
+
+		if ( $dom =~ /\@(.*)/ )
+		{
+			push ( @vfe , $dom ) ;
+			next ;
+		}
+
+		########################################
+		# ignore any that we don't actually receive mail for
+
+		next unless ( exists $alldom{$dom} ) ;
+		delete $alldom{$dom} ;
+
+		########################################
+		# make sure it's not also local
+
+		die ( "ERROR: virtualdomains domain \"$line\""
+				. " also listed in locals (or me)\n" )
+			if ( exists $ldom{$dom} ) ;
+
+		########################################
+		# check the userid
+
+		if ( $zu eq "alias" )
+		{
+			########################################
+			# if the domain is handled by the qmail "alias"
+			# user, then it needs alias processing
+
+			$adom{$dom} = 1 ;
+			$afound ++ ;
+		}
+		else
+		{
+			########################################
+			# mark this one as a virtual domain
+			# and remember the full line, we will need it later
+
+			$vdom{$dom} = $line ;
+			$vfound ++ ;
+		}
+	}
+	close I ;
+}
+
+if ( -f "$vq/control/smtproutes" )
+{
+	open ( I , "<$vq/control/smtproutes" )
+		or die "$vq/control/smtproutes: $!\n" ;
+	while ( my $line = <I> )
+	{
+		chomp $line ;
+
+		########################################
+		# extract the domain name
+
+		$line =~ s/\:.*// ;
+
+		########################################
+		# ignore lines with no domain (default instruction)
+
+		next unless $line ;
+
+		########################################
+		# ignore any that we don't actually receive mail for
+
+		next unless ( exists $alldom{$line} ) ;
+		delete $alldom{$line} ;
+
+		########################################
+		# make sure it's not also local or virtual
+
+		die ( "ERROR: smtproutes domain \"$line\""
+				. " also listed in locals (or me)\n" )
+			if ( exists $ldom{$line} ) ;
+
+		die ( "ERROR: smtproutes domain \"$line\""
+				. " also listed in virtualdomains\n" )
+			if (    ( exists $adom{$line} )
+			     || ( exists $vdom{$line} ) ) ;
+
+		########################################
+		# mark this one as an smtproutes domain
+
+		$sdom{$line} = 1 ;
+	}
+	close I ;
+}
+
+###############################################################################
+#
+# "-r" option: domain report
+
+if ( $opt{'r'} )
+{
+	my %rdom = () ;
+	map { $rdom{$_} = 1 } keys %alldom ;
+	map { $rdom{$_} = 1 } keys %ldom ;
+	map { $rdom{$_} = 1 } keys %adom ;
+	map { $rdom{$_} = 1 } keys %vdom ;
+	map { $rdom{$_} = 1 } keys %sdom ;
+
+	for my $d ( sort keys %rdom )
+	{
+		my $z =   ( ( exists $ldom{$d}   ) ? 'L' : ' ' )
+			. ( ( exists $adom{$d}   ) ? 'A' : ' ' )
+			. ( ( exists $vdom{$d}   ) ? 'V' : ' ' )
+			. ( ( exists $sdom{$d}   ) ? 'S' : ' ' )
+			. ( ( exists $alldom{$d} ) ? '?' : ' ' ) ;
+		print "$z $d\n" ;
+	}
+
+	exit 0 ;
+}
+
+###############################################################################
+#
+# catch leftovers - domains which come into the machine but are not handled
+
+for my $d ( sort keys %alldom )
+{
+	print "ERROR: $d is listed in rcpthosts/morercpthosts.cdb"
+		. " but is not handled by the server.\n" ;
+	$err ++ ;
+}
+
+###############################################################################
+#
+# make sure any virtualdomains full email addresses are within our domains
+
+for my $a ( @vfe )
+{
+	$a =~ /.*\@(.*)/ ;
+	my $d = $1 ;
+
+	unless (    exists $adom{$d} || exists $ldom{$d}
+		 || exists $sdom{$d} || exists $vdom{$d} )
+	{
+		print "ERROR: $a is listed in virtualdomains"
+			. " but is not handled by the server.\n" ;
+		$err ++ ;
+	}
+}
+
+$err && die "Cannot continue.\n" ;
+
+###############################################################################
+#
+# start generating output.
+#
+# smtproutes domains - if a directory was specified, and it exists, and a
+# file for the domain exists, read userid's from the file and generate
+# "userid@domain" lines... otherwise just generate a single "@domain" line.
+
+for my $d ( sort keys %sdom )
+{
+	if ( $smtpr_dir && ( -d $smtpr_dir ) && ( -f "$smtpr_dir/$d" ) )
+	{
+		open ( I , "<$smtpr_dir/$d" )
+			or die "Can\'t read $smtpr_dir/$d: $!\n" ;
+		while ( my $line = <I> )
+		{
+			chomp $line ;
+			$line =~ s/#.*// ;
+			$line =~ s/\@.*// ;
+			$line =~ s/^\s+// ;
+			$line =~ s/\s+$// ;
+			next unless ( $line ) ;
+			push ( @output , "$line\@$d" ) ;
+		}
+		close I ;
+	}
+	else
+	{
+		push ( @output, "\@$d" ) ;
+	}
+}
+
+###############################################################################
+#
+# local domains - all system accounts and aliases, in each local domain
+
+if ( $lfound || $afound || $vfound )
+{
+	########################################
+	# need the global "dash" character
+	# also need "alias" user's info
+
+	unless ( $gdash )
+	{
+		open ( GD , "$vq/bin/qmail-showctl |" )
+			or die "Can\'t run qmail-showctl: $!\n" ;
+		while ( my $gdline = <GD> )
+		{
+			if ( $gdline =~ /user\-ext delimiter\: (.)/ )
+			{
+				$gdash = $1 ;
+			}
+
+			if ( $gdline =~ /user ids\: (\d+)/ )
+			{
+				my $zid = $1 ;
+				@alias_pw = getpwuid ( $zid )
+					or die "getpwuid($zid) failed\n" ;
+			}
+		}
+		close GD ;
+	}
+}
+
+if ( $lfound )
+{
+	########################################
+	# turn array into hash for speed
+
+	my %ig = () ;
+	map { $ig{$_} = "" } @uid_ignore ;
+
+	########################################
+	# grab a list of system accounts
+
+	while ( my @pw = getpwent() )
+	{
+		next if ( $pw[2] < $uid_min )  ; # ignore system accounts
+		next if ( $pw[2] > $uid_max )  ; # ignore "nobody" accounts
+		next if ( exists $ig{$pw[2]} ) ; # ignore special accounts
+		next unless ( $pw[2] ) ;         # no deliveries to root
+		$lusr{$pw[0]} = 1 ;
+
+		if ( opendir ( D , $pw[7] ) )
+		{
+			while ( my $f = readdir D )
+			{
+				next unless ( $f =~ /^\.qmail${gdash}(.+)/ ) ;
+				my $zu = $1 ;
+				$zu =~ s/\:/./g ;
+				$lusr{"$pw[0]${gdash}$zu"} = 1 ;
+			}
+			closedir D ;
+		}
+	}
+}
+
+if ( ( ! $opt{"n"} ) && ( $lfound || $afound ) )
+{
+	########################################
+	# grab a list of aliases
+
+	opendir ( D , "$vq/alias" )
+		or die "$vq/alias: $!\n" ;
+	while ( my $f = readdir ( D ) )
+	{
+		next unless ( $f =~ /^\.qmail${gdash}(.*)/ ) ;
+		my $u = $1 ;
+
+		if ( $u eq "default" )
+		{
+			find_ffl ( "$vq/alias/.qmail${gdash}default" ) ;
+		}
+		else
+		{
+			$u =~ s/\:/./g ;
+			$ausr{$u} = 1 ;
+		}
+	}
+	closedir D ;
+
+	########################################
+	# if we found a fastforward file, grab those aliases as well
+
+	if ( $ffl )
+	{
+		tie ( %CDB , "CDB_File" , $ffl )
+			or die "$ffl: $!\n" ;
+
+		for my $k ( keys %CDB )
+		{
+			next unless ( $k =~ /^\:(.*)\@(.*)$/ ) ;
+			my ( $au , $ad ) = ( $1 , $2 ) ;
+
+			if ( $ad )
+			{
+				next unless (    exists ( $adom{$ad} )
+					      || exists ( $ldom{$ad} ) ) ;
+				push ( @output , "$au\@$ad" ) ;
+			}
+			else
+			{
+				$ausr{$au} = 1 ;
+			}
+		}
+
+		untie %CDB ;
+	}
+
+	########################################
+	# generate output.
+	# local domains get every system user AND every alias user
+
+	for my $dd ( sort keys %ldom )
+	{
+		map { push ( @output , "$_\@$dd" ) } sort keys %lusr ;
+		map { push ( @output , "$_\@$dd" ) } sort keys %ausr ;
+	}
+
+	########################################
+	# alias domains get every alias user
+
+	for my $dd ( sort keys %adom )
+	{
+		map { push ( @output , "$_\@$dd" ) } sort keys %ausr ;
+	}
+}
+
+###############################################################################
+#
+# virtual domains - a little more complicated.
+
+if ( $vfound )
+{
+	#######################################################################
+	#
+	# the virtualdomains file contains a mapping from the domain name to a
+	# userid, which may be a system account and may be a virtual userid
+	# defined in the $vq/users/assign file.
+	#
+	# vpopmail normally uses the domain name as the virtual userid for
+	# this purpose, but we want to be flexible enough to handle other
+	# cases as well.
+	#
+	# in order to deal with this extra layer of indirection, we need to
+	# read the users/cdb file. and because it's a cdb, we don't even need
+	# to read the whole thing- we just need to open it so that we can
+	# search it.
+
+	if ( -f "$vq/users/cdb" )
+	{
+		tie ( %CDB , "CDB_File" , "$vq/users/cdb" )
+			or die "$vq/users/cdb: $!\n" ;
+		$need_untie = 1 ;
+	}
+	else
+	{
+		%CDB = () ;
+	}
+
+	my $wc = ( $CDB{""} || "" ) ;
+
+	#######################################################################
+	#
+	# now we have the list of users/assign virtual users (if any), we need
+	# to identify the home directory, real or virutal, for the user.
+
+	for my $dom ( sort keys %vdom )
+	{
+		$vdom{$dom} =~ /\:(.*)$/ ;
+		my $usr = $1 ;
+		my $ousr = $usr ;
+		my $dash = $gdash ;
+
+		my %vusr = () ;
+		my $dir = "" ;
+		my $vpopmail = 0 ;
+		my $vp_bnm = 0 ;
+		my $ext = "" ;
+
+		########################################
+		# note that in cases where a given "userid" exists as both a
+		# system userid and a virtual userid, the virtual userid takes
+		# precedence (according to the qmail-lspawn man page.)
+		#
+		# if the "userid" contains extensions, we need to strip them
+		# off one by one and check the remaining userids.
+
+		while ( 1 )
+		{
+			if ( exists $CDB{"!$usr$wc"} )
+			{
+				my @w = split ( /\0/ , $CDB{"!$usr$wc"} ) ;
+				$dir = ( $w[3] || die
+					"mis-formed users/cdb data: $usr\n" ) ;
+				$dash = ( $w[4] || "" ) ;
+				last ;
+			}
+
+			my @pw = getpwnam ( $usr ) ;
+			if ( $pw[7] )
+			{
+				$dir = $pw[7] ;
+				last ;
+			}
+
+			last unless ( $usr =~ /^(.*)$gdash([^${gdash}]*)$/ ) ;
+
+			$usr = $1 ;
+			my $z = $2 ;
+			$ext = "$z$gdash$ext" ;
+			$ext =~ s/$gdash$// ;
+		}
+
+		########################################
+		# if we can't find anything else, fall back to using the
+		# "alias" user, with the RHS of the virtualdomains line
+		# as an "ext" value.
+
+		unless ( $dir )
+		{
+			$usr = $alias_pw[0] ;
+			$ext = $ousr ;
+			$dir = $alias_pw[7] ;
+		}
+
+		########################################
+		# now we know which directory to look in. check for a
+		# ".qmail-default" file. if it contains "vdelievermail", we
+		# know that vpopmail is in control here... and if the 
+		# vdelivermail line also has "bounce-no-mailbox", we need 
+		# the list of individual users. otherwise we can just 
+		# blindly accept the entire domain.
+
+		unless ( -r $dir )
+		{
+			print STDERR "Can\'t read directory $dir"
+				. " (for vpopmail domain \"$dom\")\n" ;
+			next ;
+		}
+
+		if ( -f "$dir/.qmail${dash}default" )
+		{
+			open ( V , "<$dir/.qmail${dash}default" )
+				or die "$dir/.qmail${dash}default: $!\n" ;
+
+			while ( my $line = <V> )
+			{
+				if ( $line =~ /vdelivermail/ )
+				{
+					$vpopmail = 1 ;
+
+					if ( $line =~ /bounce\-no\-mailbox/ )
+					{
+						$vp_bnm = 1 ;
+					}
+				}
+			}
+			close V ;
+		}
+
+		########################################
+		# if vpopmail and "bounce-no-mailbox", we need the users
+
+		if ( $vpopmail && $vp_bnm )
+		{
+			########################################
+			# if we don't already know where it is,
+			# find the vpopmail user's "/bin" directory.
+
+			unless ( $vhome )
+			{
+				my @pw = getpwnam ( $vuser )
+					or die "getpwnam($vuser): $!\n" ;
+				$vhome = $pw[7] ;
+				$vbin = "$vhome/bin" ;
+				$vinc = "$vhome/include" ;
+
+				die "Can\'t find $vbin/vuserinfo: $!\n"
+					unless ( -e "$vbin/vuserinfo" ) ;
+			}
+
+			########################################
+			# if we don't already know, find out if
+			# vpopmail was built with --enable-qmail-ext
+
+			if ( $vqext eq "?" )
+			{
+				$vqext = "no" ;
+				open ( VCH , "<$vinc/vpopmail_config.h" )
+					or die ( "Can\'t read "
+					. "$vinc/vpopmail_config.h: $!\n" ) ;
+
+				while ( my $vcl = <VCH> )
+				{
+					next unless ( $vcl =~ /^#define QMAIL_EXT 1/ ) ;
+					$vqext = "yes" ;
+					last ;
+				}
+				close VCH ;
+				debug "vqext=$vqext\n" ;
+			}
+
+			########################################
+			# run "vuserinfo -D {domain}" to get a list of
+			# actual mailboxes within the domain.
+
+			debug "/----- $vbin/vuserinfo -D $dom\n" ;
+			open ( VP , "$vbin/vuserinfo -D $dom |" )
+				or die "Can\'t execute $vbin/vuserinfo: $!\n" ;
+			while ( my $line = <VP> )
+			{
+				debug $line ;
+				next unless ( $line =~ /^name\:\s+(\S+)/ ) ;
+				my $u = $1 ;
+				$vusr{$u} = $u ;
+				debug "\t[$u]" ;
+				if ( $vqext eq "yes" )
+				{
+					$vusr{"$u${dash}default"} =
+						"$u${dash}default" ;
+					debug " [$u${dash}default]" ;
+				}
+				debug "\n" ;
+			}
+			close VP ;
+			debug "\\-----\n" ;
+
+			########################################
+			# run "valias -s {domain}" to get a list of
+			# aliases within the domain.
+
+			debug "/----- $vbin/valias -s $dom\n" ;
+			open ( VP , "$vbin/valias -s $dom |" )
+				or die "Can\'t execute $vbin/valias: $!\n" ;
+			while ( my $line = <VP> )
+			{
+				debug $line ;
+				next unless ( $line =~ /^(.+?)\@/ ) ;
+				my $u = $1 ;
+				$vusr{$u} = $u ;
+				debug "\t[$u]\n" ;
+			}
+			close VP ;
+			debug "\\-----\n" ;
+
+			########################################
+			# read the directory itself. any .qmail-___ files are
+			# also valid aliases within the domain, even if
+			# "valias" doesn't seem to know about them.
+
+			opendir ( D , $dir )
+				or die "$dir: $!\n" ;
+			while ( my $f = readdir ( D ) )
+			{
+				if ( $f =~ /^\.qmail${dash}(.*)/ )
+				{
+					my $u = $1 ;
+					next if ( $u eq "default" ) ;
+					$u =~ s/\:/./g ;
+					$vusr{$u} = $u ;
+				}
+			}
+			closedir D ;
+
+			########################################
+			# now %vusr contains a list of all valid email
+			# addresses within the domain.
+
+			map { push ( @output , "$_\@$dom" ) } sort keys %vusr ;
+		}
+
+		########################################
+		# domain managed by vpopmail, but no "bounce-no-mailbox"
+		# we accept all mail
+
+		elsif ( $vpopmail )
+		{
+
+			print STDERR <<EOF ;
+Virtual domain \"$dom\" will not reject mail to non-existent mailboxes.
+EOF
+			push ( @output , "\@$dom" ) ;
+		}
+
+		########################################
+		# virtual domain, not managed by vpopmail
+		# if .qmail-default exists, spit out "@domain"
+		# otherwise, check .qmail-* files
+
+		else
+		{
+			my $dx = $ext ? ( "$dash$ext" ) : "" ;
+
+			if (    ( -f "$dir/.qmail${dash}default"      )
+			     || ( -f "$dir/.qmail${dx}${dash}default" ) )
+			{
+				print STDERR <<EOF ;
+Virtual domain \"$dom\" might not reject mail to non-existent mailboxes.
+EOF
+				push ( @output , "\@$dom" ) ;
+			}
+			else
+			{
+				opendir ( D , $dir )
+					or die "$dir: $!\n" ;
+				while ( my $f = readdir ( D ) )
+				{
+					if ( $f =~ /^\.qmail${dx}${dash}(.*)/ )
+					{
+						my $u = $1 ;
+						$u =~ s/\:/./g ;
+						$vusr{$u} = $u ;
+					}
+				}
+				closedir D ;
+			}
+
+			########################################
+			# now %vusr contains a list of all valid email
+			# addresses within the domain.
+
+			map { push ( @output , "$_\@$dom" ) } sort keys %vusr ;
+		}
+	}
+
+	if ( $need_untie )
+	{
+		untie %CDB ;
+		$need_untie = 0 ;
+	}
+}
+
+###############################################################################
+#
+# add virtual full email addresses
+
+push ( @output , @vfe ) ;
+
+###############################################################################
+#
+# if we make it this far, we have no errors and can print the list.
+# we need to filter out any "exclude" entries
+
+my %ex = () ;
+map { $ex{lc $_} = "" } @exclude ;
+
+my %new_cdb = () ;
+map { $new_cdb{$_} = '' } grep ( ! exists $ex{$_} , @output ) ;
+
+########################################
+# read $reject_file and add reject entries
+
+if ( open ( I , "<$reject_file" ) )
+{
+	while ( my $line = <I> )
+	{
+		$line =~ s|#.*$|| ;
+		$line =~ s|^\s+|| ;
+		$line =~ s|\s+$|| ;
+		next unless $line ;
+
+		$new_cdb{$line} = '-' ;
+	}
+	close I ;
+}
+
+###############################################################################
+#
+# print the output
+
+if ( $opt{"c"} )
+{
+	########################################
+	# if the data haven't changed, don't write a new file
+
+	if ( tie ( %CDB , "CDB_File" , $opt{"c"} ) )
+	{
+		my $diff = 0 ;
+
+		my %old_cdb = %CDB ;
+		untie %CDB ;
+
+		for my $k ( keys %old_cdb )
+		{
+			if ( ! exists $new_cdb{$k} )
+			{
+				$diff = 1 ;
+				last ;
+			}
+			elsif ( $old_cdb{$k} ne $new_cdb{$k} )
+			{
+				$diff = 1 ;
+				last ;
+			}
+		}
+
+		unless ( $diff )
+		{
+			for my $k ( keys %new_cdb )
+			{
+				if ( ! exists $old_cdb{$k} )
+				{
+					$diff = 1 ;
+					last ;
+				}
+				elsif ( $old_cdb{$k} ne $new_cdb{$k} )
+				{
+					$diff = 1 ;
+					last ;
+				}
+			}
+		}
+
+		unless ( $diff )
+		{
+			debug "Data in $opt{'c'} has not changed\n" ;
+			exit 0 ;
+		}
+	}
+
+	########################################
+	# cdb file didn't exist, or data has changed
+
+	debug "Creating new $opt{'c'}\n" ;
+
+	umask 022 ;
+	$cdb = new CDB_File ( $opt{"c"} , "$opt{'c'}.tmp" )
+		or die "Can't create $opt{'c'}.tmp: $!\n" ;
+}
+
+for my $k ( sort keys %new_cdb )
+{
+	if ( $opt{"c"} )
+	{
+		$cdb->insert ( $k , $new_cdb{$k} ) ;
+	}
+	elsif ( $opt{"m"} )
+	{
+		my $zkl = length $k ;
+		my $zdl = length $new_cdb{$k} ;
+		print "+$zkl,$zdl:$k->$new_cdb{$k}\n" ;
+	}
+	else
+	{
+		print $k , ( $new_cdb{$k} ? ":$new_cdb{$k}" : '' ) , "\n" ;
+	}
+}
+
+if ( $opt{"c"} )
+{
+	$cdb->finish() ;
+}
+elsif ( $opt{"m"} )
+{
+	print "\n" ;
+}

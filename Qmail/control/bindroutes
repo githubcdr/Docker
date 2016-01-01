@@ -1,0 +1,8 @@
+# Send this on the internal net
+# 10.:10.0.0.1
+
+# Rest goes on external "mail" address (yes, its bogus!)
+#:192.168.202.84
+
+# Hey, we could 'cheat' on stopping qmail-remote sending to this host
+#555.123.123.123:this-isnt-an-ip-address

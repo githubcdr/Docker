@@ -1,0 +1,5 @@
+# localhost
+127.:allow,RELAYCLIENT="",GREETDELAY="0",DROP_PRE_GREET="0"
+
+# Internet
+:allow

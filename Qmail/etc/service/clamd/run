@@ -1,0 +1,2 @@
+#!/bin/sh
+exec clamd 2>&1
