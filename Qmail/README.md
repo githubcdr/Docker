@@ -10,3 +10,8 @@ run with
 ```
 docker run -d cdrocker/qmail:latest
 ```
+
+TODO
+
+Fix a small bug in vpopmail signal handling after changing a domain...
+
