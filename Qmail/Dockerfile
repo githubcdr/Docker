@@ -148,7 +148,7 @@ ADD     etc/service/dovecot/run /etc/service/dovecot/run
 
 
 # Fix permissions
-#RUN	chmod +x /etc/service/spamd/run /etc/service/clamd/run /etc/service/mysqld/run /etc/service/dovecot/run
+RUN	chmod +x /etc/service/spamd/run /etc/service/clamd/run /etc/service/mysqld/run /etc/service/dovecot/run /etc/service/qmail-smtpd/run /etc/service/qmail-send/run
 RUN	sa-update -D
 RUN	sa-compile -D
 RUN	mkdir /var/run/clamav && chown clamav /var/run/clamav/
@@ -157,3 +157,4 @@ RUN	freshclam
 # Clean up APT when done.
 RUN     apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
+EXPOSE 25 993 994 110 143
