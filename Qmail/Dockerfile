@@ -14,7 +14,7 @@ ENV     LC_ALL en_US.UTF-8
 ENV     DEBIAN_FRONTEND noninteractive
 
 # Used for fast setup of Qmail
-ENV	MAILHOSTNAME mail.yolo
+ENV	MAILHOSTNAME mail.bendover.nl
 
 # set sane locale
 RUN     locale-gen en_US.UTF-8
