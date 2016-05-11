@@ -1,8 +1,12 @@
-FROM sebp/elk
+FROM sebp/elk:latest
 WORKDIR /tmp
 
-#install unzip
-RUN apt-get install -qqy unzip git
+# install curator repo
+RUN curl https://packages.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
+RUN echo "deb http://packages.elastic.co/curator/3/debian stable main" > /etc/apt/sources.list.d/curator.list
+
+#install moar shit
+RUN apt-get update && apt-get install -qqy unzip git python-elasticsearch-curator
 
 # remove old config and prepare new
 RUN rm -vf /etc/logstash/conf.d/*.conf ; \
@@ -28,9 +32,10 @@ RUN /opt/logstash/bin/plugin install logstash-input-beats
 # update elasticsearch plugins
 RUN /usr/share/elasticsearch/bin/plugin install royrusso/elasticsearch-HQ
 RUN /usr/share/elasticsearch/bin/plugin install lmenezes/elasticsearch-kopf/2.0/v2.1.1
+RUN /usr/share/elasticsearch/bin/plugin install mobz/elasticsearch-head
 
 # install filebeat support for kibana
-RUN curl -L -O http://download.elastic.co/beats/dashboards/beats-dashboards-1.1.1.zip
+RUN curl -L -O http://download.elastic.co/beats/dashboards/beats-dashboards-1.1.2.zip
 
 # add support for cisco syslog
 ADD files/logstash.conf /etc/logstash/conf.d/
