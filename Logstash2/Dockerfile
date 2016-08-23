@@ -40,7 +40,8 @@ RUN curl -L -O http://download.elastic.co/beats/dashboards/beats-dashboards-1.2.
 # add support for cisco syslog
 ADD files/logstash.conf /etc/logstash/conf.d/
 
-# TODO, add geoIP data, kibana dashboards at runtime
+# permissions
+RUN chown -R elasticsearch:elasticsearch /var/lib/elasticsearch
 
 # cleanup
 #RUN rm /etc/logstash/conf.d/01-lumberjack-input.conf
