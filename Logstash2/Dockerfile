@@ -35,7 +35,7 @@ RUN /usr/share/elasticsearch/bin/plugin install lmenezes/elasticsearch-kopf/2.0/
 RUN /usr/share/elasticsearch/bin/plugin install mobz/elasticsearch-head
 
 # install filebeat support for kibana
-RUN curl -L -O http://download.elastic.co/beats/dashboards/beats-dashboards-1.2.3.zip
+RUN curl -L -O http://download.elastic.co/beats/dashboards/beats-dashboards-1.3.1.zip
 
 # add support for cisco syslog
 ADD files/logstash.conf /etc/logstash/conf.d/
