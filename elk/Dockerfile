@@ -27,7 +27,7 @@ RUN git clone https://github.com/logstash-plugins/logstash-patterns-core.git \
 
 # update logstash plugins
 #RUN /opt/logstash/bin/plugin update
-RUN /opt/logstash/bin/plugin install logstash-input-beats
+#RUN /opt/logstash/bin/plugin install logstash-input-beats
 
 # update elasticsearch plugins
 RUN /usr/share/elasticsearch/bin/plugin install royrusso/elasticsearch-HQ
