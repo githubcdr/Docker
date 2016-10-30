@@ -6,7 +6,7 @@ WORKDIR /tmp
 #RUN echo "deb http://packages.elastic.co/curator/3/debian stable main" > /etc/apt/sources.list.d/curator.list
 
 #install moar shit
-#RUN apt-get update && apt-get install -qqy unzip git python-elasticsearch-curator
+RUN apt-get update && apt-get install -qqy unzip git elasticsearch-curator
 
 # remove old config and prepare new
 RUN rm -vf /etc/logstash/conf.d/*.conf ; \
