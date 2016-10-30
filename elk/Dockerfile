@@ -30,9 +30,9 @@ RUN git clone https://github.com/logstash-plugins/logstash-patterns-core.git \
 #RUN /opt/logstash/bin/plugin install logstash-input-beats
 
 # update elasticsearch plugins
-RUN /usr/share/elasticsearch/bin/plugin install royrusso/elasticsearch-HQ
-RUN /usr/share/elasticsearch/bin/plugin install lmenezes/elasticsearch-kopf/2.0/v2.1.1
-RUN /usr/share/elasticsearch/bin/plugin install mobz/elasticsearch-head
+#RUN /usr/share/elasticsearch/bin/plugin install royrusso/elasticsearch-HQ
+#RUN /usr/share/elasticsearch/bin/plugin install lmenezes/elasticsearch-kopf/2.0/v2.1.1
+#RUN /usr/share/elasticsearch/bin/plugin install mobz/elasticsearch-head
 
 # install filebeat support for kibana
 RUN curl -L -O http://download.elastic.co/beats/dashboards/beats-dashboards-1.3.1.zip
