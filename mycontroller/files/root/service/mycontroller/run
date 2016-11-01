@@ -1,6 +1,0 @@
-#!/usr/bin/env sh
-
-cd /usr/local/mycontroller
-
-exec java -Xms8m -Xmx100m -Dlogback.configurationFile=conf/logback.xml -Dmc.conf.file=conf/mycontroller.properties -cp lib/* org.mycontroller.standalone.StartApp 2>&1
-
