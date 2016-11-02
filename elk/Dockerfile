@@ -2,15 +2,15 @@ FROM sebp/elk:es241_l240_k461
 WORKDIR /tmp
 
 # install curator repo
-RUN curl https://packages.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
-RUN echo "deb http://packages.elastic.co/curator/3/debian stable main" > /etc/apt/sources.list.d/curator.list
+#RUN curl https://packages.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
+#RUN echo "deb http://packages.elastic.co/curator/3/debian stable main" > /etc/apt/sources.list.d/curator.list
 
-#install moar shit
-RUN apt-get update && apt-get install -qqy unzip git python-elasticsearch-curator
+# dependencies, removed python-elasticsearch-curator
+RUN apt-get update && apt-get install -qqy unzip git
 
 # remove old config and prepare new
-RUN rm -vf /etc/logstash/conf.d/*.conf ; \
-    mkdir /opt/logstash/databases
+RUN rm -f /etc/logstash/conf.d/*.conf \
+    && mkdir /opt/logstash/databases
 
 # geoIP
 RUN curl -L -O http://download.maxmind.com/download/geoip/database/asnum/GeoIPASNum.dat.gz \
