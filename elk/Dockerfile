@@ -1,9 +1,9 @@
-FROM sebp/elk:latest
+FROM sebp/elk:es241_l240_k461
 WORKDIR /tmp
 
 # install curator repo
-#RUN curl https://packages.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
-#RUN echo "deb http://packages.elastic.co/curator/3/debian stable main" > /etc/apt/sources.list.d/curator.list
+RUN curl https://packages.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
+RUN echo "deb http://packages.elastic.co/curator/3/debian stable main" > /etc/apt/sources.list.d/curator.list
 
 #install moar shit
 RUN apt-get update && apt-get install -qqy unzip git elasticsearch-curator
@@ -27,12 +27,12 @@ RUN git clone https://github.com/logstash-plugins/logstash-patterns-core.git \
 
 # update logstash plugins
 #RUN /opt/logstash/bin/plugin update
-#RUN /opt/logstash/bin/plugin install logstash-input-beats
+RUN /opt/logstash/bin/plugin install logstash-input-beats
 
 # update elasticsearch plugins
-#RUN /usr/share/elasticsearch/bin/plugin install royrusso/elasticsearch-HQ
-#RUN /usr/share/elasticsearch/bin/plugin install lmenezes/elasticsearch-kopf/2.0/v2.1.1
-#RUN /usr/share/elasticsearch/bin/plugin install mobz/elasticsearch-head
+RUN /usr/share/elasticsearch/bin/plugin install royrusso/elasticsearch-HQ
+RUN /usr/share/elasticsearch/bin/plugin install lmenezes/elasticsearch-kopf/2.0/v2.1.1
+RUN /usr/share/elasticsearch/bin/plugin install mobz/elasticsearch-head
 
 # install filebeat support for kibana
 RUN curl -L -O http://download.elastic.co/beats/dashboards/beats-dashboards-1.3.1.zip
